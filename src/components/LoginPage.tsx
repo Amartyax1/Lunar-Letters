@@ -4,7 +4,7 @@ import { Label } from './ui/label'
 import { Card } from './ui/card'
 import { Moon } from 'lucide-react'
 import { useState } from 'react'
-import { supabase } from '@/lib/supabaseClient'   
+import { supabase } from '@/lib/supabaseClient'
 
 interface LoginPageProps {
   onLogin: () => void
@@ -32,13 +32,23 @@ export function LoginPage({ onLogin, onNavigateToSignup }: LoginPageProps) {
       console.error('Login error:', error)
     } else {
       alert('Logged in successfully!')
-      onLogin() // notify parent
+      onLogin()
     }
   }
 
   const handleGoogleLogin = async () => {
-    // for later (after deploy to Vercel)
-    alert('Google login not set up yet — works after deployment.')
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      // optional: add redirectTo if you have a dedicated callback route
+      // options: {
+      //   redirectTo: `${window.location.origin}/auth/callback`,
+      // },
+    })
+
+    if (error) {
+      console.error('Google login error:', error)
+      alert(error.message)
+    }
   }
 
   return (

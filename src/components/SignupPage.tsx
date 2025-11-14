@@ -4,7 +4,7 @@ import { Label } from './ui/label'
 import { Card } from './ui/card'
 import { Moon } from 'lucide-react'
 import { useState } from 'react'
-import { supabase } from '@/lib/supabaseClient'   
+import { supabase } from '@/lib/supabaseClient'
 
 interface SignupPageProps {
   onSignup: () => void
@@ -25,7 +25,7 @@ export function SignupPage({ onSignup, onNavigateToLogin }: SignupPageProps) {
       email,
       password,
       options: {
-        data: { name }, // optional user metadata
+        data: { name },
       },
     })
 
@@ -40,8 +40,19 @@ export function SignupPage({ onSignup, onNavigateToLogin }: SignupPageProps) {
     }
   }
 
-  const handleGoogleSignup = async () => {
-    alert('Google signup not set up yet — works after deployment.')
+  const handleGoogleLogin = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      // optional: add redirectTo if you have a dedicated callback route
+      // options: {
+      //   redirectTo: `${window.location.origin}/auth/callback`,
+      // },
+    })
+
+    if (error) {
+      console.error('Google signup error:', error)
+      alert(error.message)
+    }
   }
 
   return (
@@ -122,7 +133,7 @@ export function SignupPage({ onSignup, onNavigateToLogin }: SignupPageProps) {
             type="button"
             variant="outline"
             className="w-full"
-            onClick={handleGoogleSignup}
+            onClick={handleGoogleLogin}
           >
             <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
               <path
