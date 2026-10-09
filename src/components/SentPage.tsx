@@ -1,8 +1,8 @@
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { Mail, Clock, Check, Edit, Eye } from 'lucide-react';
-import { useState } from 'react';
+import { Mail, Clock, Check, Edit, Eye, FileText } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -11,19 +11,7 @@ import {
 } from './ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { toast } from 'sonner@2.0.3';
-
-interface SentLetter {
-  id: string;
-  to: string;
-  toMultiple?: string[];
-  subject: string;
-  content: string;
-  backgroundColor?: string;
-  sentDate?: string;
-  scheduledFor: string;
-  status: 'sent' | 'scheduled';
-  circle?: string;
-}
+import { listDrafts, listSent, type Letter } from '../lib/mailbox';
 
 interface EditLetter {
   id: string;
@@ -37,115 +25,105 @@ interface SentPageProps {
   onEditLetter: (letter: EditLetter) => void;
 }
 
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error) return error;
+  return 'Something went wrong while loading your letters.';
+}
+
+function formatLetterDate(value: string | null): string {
+  if (!value) return 'Unknown date';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function letterTitle(letter: Letter): string {
+  const title = letter.title.trim();
+  return title || 'Untitled letter';
+}
+
+function letterPreview(body: string): string {
+  const flat = body.replace(/\s+/g, ' ').trim();
+  if (!flat) return 'This letter is empty.';
+  if (flat.length <= 180) return flat;
+  return `${flat.slice(0, 177)}…`;
+}
+
+function letterWhen(letter: Letter): string {
+  if (letter.status === 'sent') {
+    return `Sent on ${formatLetterDate(letter.sentAt ?? letter.updatedAt)}`;
+  }
+  if (letter.scheduledFor) {
+    return `Scheduled for ${formatLetterDate(letter.scheduledFor)}`;
+  }
+  return `Updated ${formatLetterDate(letter.updatedAt)}`;
+}
+
 export function SentPage({ onEditLetter }: SentPageProps) {
-  const [letters, setLetters] = useState<SentLetter[]>([
-    {
-      id: '1',
-      to: 'Mom, Dad, Sister',
-      toMultiple: ['Mom', 'Dad', 'Sister'],
-      subject: 'Happy holidays from the city!',
-      content: `Dear family,
+  const [sentLetters, setSentLetters] = useState<Letter[]>([]);
+  const [draftLetters, setDraftLetters] = useState<Letter[]>([]);
+  const [selectedLetter, setSelectedLetter] = useState<Letter | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-I hope this letter finds you all well. The city is beautiful this time of year, with lights everywhere and that crisp winter air.
+  useEffect(() => {
+    let cancelled = false;
 
-I've been thinking about our last family dinner and how much I miss those moments. Work has been busy, but good - I got that promotion I mentioned!
+    Promise.all([listSent(), listDrafts()])
+      .then(([sent, drafts]) => {
+        if (cancelled) return;
+        if (!Array.isArray(sent) || !Array.isArray(drafts)) {
+          throw new Error('Letters did not come back as a list.');
+        }
+        setSentLetters(sent);
+        setDraftLetters(drafts);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setSentLetters([]);
+        setDraftLetters([]);
+        setError(errorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
-Can't wait to see you all at Christmas. I'm bringing that dessert you all love.
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-Love you all,
-Your son/brother`,
-      backgroundColor: '#fef3e2',
-      sentDate: 'Dec 1, 2024',
-      scheduledFor: 'Dec 1, 2024',
-      status: 'sent',
-      circle: 'Family',
-    },
-    {
-      id: '2',
-      to: 'Alex',
-      subject: 'Remember that time we got lost in Tokyo?',
-      content: `Hey Alex,
-
-I was going through old photos and found that picture of us completely lost in Tokyo at 3 AM, eating convenience store onigiri and laughing about our terrible sense of direction.
-
-We should plan another trip soon. Maybe somewhere we can get lost in again?
-
-Let me know when you're free to call.
-
-Your perpetually lost travel buddy`,
-      backgroundColor: '#e8f4f8',
-      sentDate: 'Nov 1, 2024',
-      scheduledFor: 'Nov 1, 2024',
-      status: 'sent',
-    },
-    {
-      id: '3',
-      to: 'Sarah, Marcus, Emma, James',
-      toMultiple: ['Sarah', 'Marcus', 'Emma', 'James'],
-      subject: 'Next book club pick',
-      content: `Book Club friends!
-
-Okay, hear me out - for next month, I'm proposing "The Ministry for the Future" by Kim Stanley Robinson.
-
-It's climate fiction that's actually hopeful, which we could all use right now. Plus it's got that blend of science and storytelling that I know we all love.
-
-Let me know what you think! And yes, I promise it's not as depressing as the last one I picked.
-
-See you at next month's meeting!`,
-      backgroundColor: '#f8e8f4',
-      scheduledFor: 'Jan 1, 2025',
-      status: 'scheduled',
-      circle: 'Book Club',
-    },
-    {
-      id: '4',
-      to: 'Jordan',
-      subject: 'You were right about the coffee shop',
-      content: `Jordan,
-
-You know that coffee shop you recommended? The one with the weird art on the walls?
-
-I finally went, and I have to admit - you were absolutely right. Best cortado I've had in the city. And yes, the art is still weird.
-
-I'm sorry I doubted your taste in coffee spots.
-
-Thanks for the rec!`,
-      backgroundColor: '#e8f8f0',
-      scheduledFor: 'Jan 1, 2025',
-      status: 'scheduled',
-    },
-  ]);
-
-  const [selectedLetter, setSelectedLetter] = useState<SentLetter | null>(null);
-  const [viewMode, setViewMode] = useState<'view' | 'edit'>('view');
-
-  const handleViewLetter = (letter: SentLetter) => {
+  const handleViewLetter = (letter: Letter) => {
     setSelectedLetter(letter);
-    setViewMode('view');
   };
 
-  const handleEditLetter = (letter: SentLetter) => {
+  const handleEditLetter = (letter: Letter) => {
     if (letter.status === 'sent') {
       toast.error('Cannot edit letters that have already been sent');
       return;
     }
-    // Navigate to Write page with the letter data
     onEditLetter({
       id: letter.id,
-      to: letter.to,
-      subject: letter.subject,
-      content: letter.content,
-      backgroundColor: letter.backgroundColor || '#fafaf8',
+      to: letter.circleId ?? '',
+      subject: letter.title,
+      content: letter.body,
+      backgroundColor: letter.paperColor || '#fafaf8',
     });
   };
 
-  const handleSaveEdit = () => {
-    toast.success('Letter updated!');
-    setSelectedLetter(null);
-  };
-
-  const sentLetters = letters.filter(l => l.status === 'sent');
-  const scheduledLetters = letters.filter(l => l.status === 'scheduled');
+  const seen = new Set<string>();
+  const allLetters: Letter[] = [];
+  for (const letter of [...sentLetters, ...draftLetters]) {
+    if (seen.has(letter.id)) continue;
+    seen.add(letter.id);
+    allLetters.push(letter);
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-secondary/20 py-8 px-4">
@@ -155,127 +133,121 @@ Thanks for the rec!`,
             Sent Letters
           </h1>
           <p className="text-muted-foreground">
-            View your sent letters and manage scheduled ones
+            View your sent letters and manage drafts before they go out
           </p>
         </div>
 
-        <Tabs defaultValue="all" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 max-w-md">
-            <TabsTrigger value="all">
-              All ({letters.length})
-            </TabsTrigger>
-            <TabsTrigger value="sent">
-              Sent ({sentLetters.length})
-            </TabsTrigger>
-            <TabsTrigger value="scheduled">
-              Scheduled ({scheduledLetters.length})
-            </TabsTrigger>
-          </TabsList>
+        {loading ? (
+          <Card className="p-12 text-center paper-texture shadow-vintage">
+            <div className="relative z-10">
+              <p className="text-muted-foreground">Loading your letters…</p>
+            </div>
+          </Card>
+        ) : error ? (
+          <Card className="p-12 text-center paper-texture shadow-vintage" role="alert">
+            <div className="relative z-10">
+              <Mail className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-50" />
+              <h2 className="font-display text-2xl text-foreground mb-2">
+                Couldn&apos;t load your letters
+              </h2>
+              <p className="text-foreground">{error}</p>
+            </div>
+          </Card>
+        ) : (
+          <Tabs defaultValue="all" className="space-y-6">
+            <TabsList className="grid w-full grid-cols-3 max-w-md">
+              <TabsTrigger value="all">
+                All ({allLetters.length})
+              </TabsTrigger>
+              <TabsTrigger value="sent">
+                Sent ({sentLetters.length})
+              </TabsTrigger>
+              <TabsTrigger value="drafts">
+                Drafts ({draftLetters.length})
+              </TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="all" className="space-y-4">
-            {letters.map((letter) => (
-              <LetterCard
-                key={letter.id}
-                letter={letter}
-                onView={handleViewLetter}
-                onEdit={handleEditLetter}
-              />
-            ))}
-          </TabsContent>
+            <TabsContent value="all" className="space-y-4">
+              {allLetters.length === 0 ? (
+                <EmptyState message="No letters yet" />
+              ) : (
+                allLetters.map((letter) => (
+                  <LetterCard
+                    key={letter.id}
+                    letter={letter}
+                    onView={handleViewLetter}
+                    onEdit={handleEditLetter}
+                  />
+                ))
+              )}
+            </TabsContent>
 
-          <TabsContent value="sent" className="space-y-4">
-            {sentLetters.length === 0 ? (
-              <EmptyState message="No sent letters yet" />
-            ) : (
-              sentLetters.map((letter) => (
-                <LetterCard
-                  key={letter.id}
-                  letter={letter}
-                  onView={handleViewLetter}
-                  onEdit={handleEditLetter}
-                />
-              ))
-            )}
-          </TabsContent>
+            <TabsContent value="sent" className="space-y-4">
+              {sentLetters.length === 0 ? (
+                <EmptyState message="No sent letters yet" />
+              ) : (
+                sentLetters.map((letter) => (
+                  <LetterCard
+                    key={letter.id}
+                    letter={letter}
+                    onView={handleViewLetter}
+                    onEdit={handleEditLetter}
+                  />
+                ))
+              )}
+            </TabsContent>
 
-          <TabsContent value="scheduled" className="space-y-4">
-            {scheduledLetters.length === 0 ? (
-              <EmptyState message="No scheduled letters" />
-            ) : (
-              scheduledLetters.map((letter) => (
-                <LetterCard
-                  key={letter.id}
-                  letter={letter}
-                  onView={handleViewLetter}
-                  onEdit={handleEditLetter}
-                />
-              ))
-            )}
-          </TabsContent>
-        </Tabs>
+            <TabsContent value="drafts" className="space-y-4">
+              {draftLetters.length === 0 ? (
+                <EmptyState message="No drafts yet" />
+              ) : (
+                draftLetters.map((letter) => (
+                  <LetterCard
+                    key={letter.id}
+                    letter={letter}
+                    onView={handleViewLetter}
+                    onEdit={handleEditLetter}
+                  />
+                ))
+              )}
+            </TabsContent>
+          </Tabs>
+        )}
       </div>
 
-      {/* Letter View/Edit Dialog */}
       <Dialog open={!!selectedLetter} onOpenChange={() => setSelectedLetter(null)}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           {selectedLetter && (
             <div>
               <DialogHeader>
                 <DialogTitle className="font-display text-2xl">
-                  {selectedLetter.subject}
+                  {letterTitle(selectedLetter)}
                 </DialogTitle>
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground font-mono pt-2">
-                  <span>To: {selectedLetter.to}</span>
-                  {selectedLetter.circle && (
+                  {selectedLetter.circleId && (
                     <>
+                      <span>Circle {selectedLetter.circleId}</span>
                       <span>•</span>
-                      <Badge className="bg-accent/20 text-accent-foreground">
-                        {selectedLetter.circle}
-                      </Badge>
                     </>
                   )}
-                  {selectedLetter.toMultiple && selectedLetter.toMultiple.length > 1 && (
-                    <>
-                      <span>•</span>
-                      <Badge className="bg-accent/20 text-accent-foreground">
-                        {selectedLetter.toMultiple.length} recipients
-                      </Badge>
-                    </>
-                  )}
+                  <StatusBadge letter={selectedLetter} />
                   <span>•</span>
-                  {selectedLetter.status === 'sent' ? (
-                    <span>Sent: {selectedLetter.sentDate}</span>
-                  ) : (
-                    <span>Scheduled for: {selectedLetter.scheduledFor}</span>
-                  )}
+                  <span>{letterWhen(selectedLetter)}</span>
                 </div>
               </DialogHeader>
 
-              {selectedLetter.toMultiple && selectedLetter.toMultiple.length > 1 && (
-                <div className="mt-4 p-3 rounded-lg bg-secondary/50 border border-border">
-                  <p className="text-sm mb-2">This letter will be sent to:</p>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedLetter.toMultiple.map((recipient, index) => (
-                      <Badge key={index} variant="outline">
-                        {recipient}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               <div
                 className="mt-6 p-8 rounded-lg lined-paper min-h-[300px]"
-                style={{ backgroundColor: selectedLetter.backgroundColor }}
+                style={{ backgroundColor: selectedLetter.paperColor || '#fafaf8' }}
               >
                 <div className="whitespace-pre-wrap leading-relaxed font-serif">
-                  {selectedLetter.content}
+                  {selectedLetter.body}
                 </div>
               </div>
 
               <div className="mt-6 flex justify-between">
                 <div>
-                  {selectedLetter.status === 'scheduled' && (
+                  {selectedLetter.status !== 'sent' && (
                     <Button
                       variant="outline"
                       onClick={() => handleEditLetter(selectedLetter)}
@@ -297,14 +269,41 @@ Thanks for the rec!`,
   );
 }
 
+function StatusBadge({ letter }: { letter: Letter }) {
+  if (letter.status === 'sent') {
+    return (
+      <Badge className="bg-green-100 text-green-800 border-green-200">
+        <Check className="w-3 h-3 mr-1" />
+        Sent
+      </Badge>
+    );
+  }
+
+  if (letter.status === 'scheduled') {
+    return (
+      <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">
+        <Clock className="w-3 h-3 mr-1" />
+        Scheduled
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge className="bg-accent/20 text-accent-foreground">
+      <FileText className="w-3 h-3 mr-1" />
+      {letter.status === 'draft' ? 'Draft' : letter.status || 'Draft'}
+    </Badge>
+  );
+}
+
 function LetterCard({
   letter,
   onView,
   onEdit,
 }: {
-  letter: SentLetter;
-  onView: (letter: SentLetter) => void;
-  onEdit: (letter: SentLetter) => void;
+  letter: Letter;
+  onView: (letter: Letter) => void;
+  onEdit: (letter: Letter) => void;
 }) {
   return (
     <Card className="p-6 paper-texture shadow-vintage hover:shadow-vintage-lg transition-all duration-300 border border-border">
@@ -313,45 +312,19 @@ function LetterCard({
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-2">
               <h3 className="font-serif text-lg text-foreground">
-                {letter.subject}
+                {letterTitle(letter)}
               </h3>
-              {letter.status === 'sent' ? (
-                <Badge className="bg-green-100 text-green-800 border-green-200">
-                  <Check className="w-3 h-3 mr-1" />
-                  Sent
-                </Badge>
-              ) : (
-                <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">
-                  <Clock className="w-3 h-3 mr-1" />
-                  Scheduled
-                </Badge>
-              )}
+              <StatusBadge letter={letter} />
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <span>To: {letter.to}</span>
-              {letter.circle && (
-                <>
-                  <span>•</span>
-                  <Badge className="bg-accent/20 text-accent-foreground text-xs">
-                    {letter.circle}
-                  </Badge>
-                </>
-              )}
-              {letter.toMultiple && letter.toMultiple.length > 1 && (
-                <>
-                  <span>•</span>
-                  <Badge className="bg-accent/20 text-accent-foreground text-xs">
-                    {letter.toMultiple.length} recipients
-                  </Badge>
-                </>
-              )}
-            </div>
+            {letter.circleId && (
+              <p className="text-sm text-muted-foreground">
+                Circle {letter.circleId}
+              </p>
+            )}
 
             <p className="text-sm text-muted-foreground mt-2 font-mono">
-              {letter.status === 'sent'
-                ? `Sent on ${letter.sentDate}`
-                : `Scheduled for ${letter.scheduledFor}`}
+              {letterWhen(letter)}
             </p>
           </div>
 
@@ -359,7 +332,7 @@ function LetterCard({
             <Button variant="outline" size="sm" onClick={() => onView(letter)}>
               <Eye className="w-4 h-4" />
             </Button>
-            {letter.status === 'scheduled' && (
+            {letter.status !== 'sent' && (
               <Button variant="outline" size="sm" onClick={() => onEdit(letter)}>
                 <Edit className="w-4 h-4" />
               </Button>
@@ -368,7 +341,7 @@ function LetterCard({
         </div>
 
         <p className="text-muted-foreground line-clamp-2 leading-relaxed">
-          {letter.content}
+          {letterPreview(letter.body)}
         </p>
       </div>
     </Card>
