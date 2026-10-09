@@ -1,15 +1,8 @@
 import { Card } from './ui/card';
 import { Button } from './ui/button';
-import { Label } from './ui/label';
 import { Input } from './ui/input';
+import { Label } from './ui/label';
 import { Badge } from './ui/badge';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './ui/select';
 import {
   Dialog,
   DialogContent,
@@ -30,6 +23,7 @@ import {
 import { Bold, Italic, Save, Send, Palette, Users, FileText, Sparkles, Clock } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner@2.0.3';
+import { CircleManager } from './CircleManager';
 import {
   listCircles,
   listDrafts,
@@ -105,6 +99,7 @@ function errorMessage(error: unknown, fallback: string) {
 export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const pendingRecipient = useRef<string | null>(null);
+  const [to, setTo] = useState('');
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
   const [backgroundColor, setBackgroundColor] = useState('#fafaf8');
@@ -112,7 +107,8 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [boldActive, setBoldActive] = useState(false);
   const [italicActive, setItalicActive] = useState(false);
-  const [circleId, setCircleId] = useState('');
+  const [selectedCircle, setSelectedCircle] = useState('');
+  const [selectedCircleId, setSelectedCircleId] = useState<string | null>(null);
   const [activeDraftId, setActiveDraftId] = useState<string | undefined>();
   const [showCircleDialog, setShowCircleDialog] = useState(false);
   const [showDraftsDialog, setShowDraftsDialog] = useState(false);
@@ -153,14 +149,21 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
     return shuffled.slice(0, Math.floor(Math.random() * 2) + 2);
   });
 
-  const savedDrafts = drafts.filter((letter) => !letter.status || letter.status === 'draft');
-  const selectedCircle = circles.find((circle) => circle.id === circleId);
+  const savedDrafts = drafts.filter((letter) => letter.status === 'draft');
 
   const writeEditor = (html: string) => {
     setContent(html);
     if (editorRef.current && editorRef.current.innerHTML !== html) {
       editorRef.current.innerHTML = html;
     }
+  };
+
+  const refreshDrafts = async () => {
+    setDrafts(await listDrafts());
+  };
+
+  const refreshCircles = async () => {
+    setCircles(await listCircles());
   };
 
   useEffect(() => {
@@ -173,8 +176,8 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
         if (active) toast.error(errorMessage(error, 'Could not load drafts'));
       });
     listCircles()
-      .then((availableCircles) => {
-        if (active) setCircles(availableCircles);
+      .then((available) => {
+        if (active) setCircles(available);
       })
       .catch((error) => {
         if (active) toast.error(errorMessage(error, 'Could not load circles'));
@@ -186,9 +189,12 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
 
   useEffect(() => {
     if (!letterToEdit) return;
+    setTo(letterToEdit.to);
     setSubject(letterToEdit.subject);
     writeEditor(toEditorHtml(letterToEdit.content));
     setBackgroundColor(letterToEdit.backgroundColor);
+    setSelectedCircle('');
+    setSelectedCircleId(null);
     setActiveDraftId(undefined);
     pendingRecipient.current = letterToEdit.to;
     toast.success('Letter loaded for editing');
@@ -201,12 +207,21 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
     const match = circles.find(
       (circle) =>
         circle.name === recipient ||
-        circle.memberEmails.join(', ') === recipient,
+        (circle.memberEmails ?? []).join(', ') === recipient,
     );
     if (!match) return;
-    setCircleId(match.id);
+    setSelectedCircle(match.name);
+    setSelectedCircleId(match.id);
     pendingRecipient.current = null;
   }, [circles]);
+
+  useEffect(() => {
+    if (!selectedCircleId || selectedCircle) return;
+    const match = circles.find((circle) => circle.id === selectedCircleId);
+    if (!match) return;
+    setSelectedCircle(match.name);
+    setTo((match.memberEmails ?? []).join(', '));
+  }, [circles, selectedCircleId, selectedCircle]);
 
   useEffect(() => {
     const today = new Date();
@@ -237,22 +252,19 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
     return () => document.removeEventListener('selectionchange', updateFormatState);
   }, []);
 
-  const circleName = (id: string | null) =>
-    circles.find((circle) => circle.id === id)?.name ?? 'No circle';
+  const circleLabel = (id: string | null) => {
+    if (!id) return 'No circle';
+    return circles.find((circle) => circle.id === id)?.name ?? 'Circle';
+  };
 
   const currentBody = () => editorRef.current?.innerHTML ?? content;
 
-  const refreshDrafts = async () => {
-    setDrafts(await listDrafts());
-  };
-
   const persistDraft = async () => {
-    const body = currentBody();
     const input: LetterInput = {
       ...(activeDraftId ? { id: activeDraftId } : {}),
-      circleId: circleId || null,
+      circleId: selectedCircleId,
       title: subject.trim() || 'No subject',
-      body,
+      body: currentBody(),
       paperColor: backgroundColor,
     };
     const saved = await saveDraft(input);
@@ -275,7 +287,10 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
   };
 
   const loadDraft = (draft: Letter) => {
-    setCircleId(draft.circleId ?? '');
+    const circle = circles.find((item) => item.id === draft.circleId);
+    setSelectedCircleId(draft.circleId);
+    setSelectedCircle(circle?.name ?? '');
+    setTo(circle ? (circle.memberEmails ?? []).join(', ') : '');
     setSubject(draft.title);
     writeEditor(toEditorHtml(draft.body));
     setBackgroundColor(draft.paperColor);
@@ -285,7 +300,7 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
   };
 
   const handleLoadDraft = (draft: Letter) => {
-    if (plainText(currentBody()) || subject || circleId) {
+    if (plainText(currentBody()) || to || subject) {
       setDraftToLoad(draft);
       setShowSaveWarning(true);
       return;
@@ -313,16 +328,18 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
   };
 
   const clearComposer = () => {
+    setTo('');
     setSubject('');
-    setCircleId('');
+    setSelectedCircle('');
+    setSelectedCircleId(null);
     setActiveDraftId(undefined);
     writeEditor('');
   };
 
   const handleSend = async () => {
     if (busy) return;
-    if (!circleId) {
-      toast.error('Please select a circle');
+    if (!to && !selectedCircle) {
+      toast.error('Please select a recipient');
       return;
     }
     if (!subject.trim()) {
@@ -336,7 +353,6 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
     setBusy(true);
     try {
       const saved = await persistDraft();
-      if (!saved) return;
       const scheduled = await scheduleLetter(saved.id);
       await refreshDrafts();
       toast.success(`Letter scheduled for ${formatDelivery(scheduled.scheduledFor)}`);
@@ -346,6 +362,13 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleUseCircle = (circle: Circle) => {
+    setSelectedCircle(circle.name);
+    setSelectedCircleId(circle.id);
+    setTo((circle.memberEmails ?? []).join(', '));
+    setShowCircleDialog(false);
   };
 
   const applyFormat = (command: 'bold' | 'italic') => {
@@ -389,24 +412,16 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
                 <div className="space-y-2">
                   <Label>To</Label>
                   <div className="flex gap-2">
-                    <Select
-                      value={circleId || undefined}
-                      onValueChange={setCircleId}
-                    >
-                      <SelectTrigger
-                        aria-label="Choose a circle"
-                        className="bg-input-background border-border flex-1"
-                      >
-                        <SelectValue placeholder="Choose a circle" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {circles.map((circle) => (
-                          <SelectItem key={circle.id} value={circle.id}>
-                            {circle.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Input
+                      placeholder="Enter recipient names separated by commas"
+                      value={to}
+                      onChange={(e) => {
+                        setTo(e.target.value);
+                        setSelectedCircle('');
+                        setSelectedCircleId(null);
+                      }}
+                      className="bg-input-background border-border flex-1"
+                    />
                     <Button
                       variant="outline"
                       onClick={() => setShowCircleDialog(true)}
@@ -418,16 +433,8 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
                   </div>
                   {selectedCircle && (
                     <Badge className="bg-accent/20 text-accent-foreground">
-                      Circle: {selectedCircle.name}
+                      Circle: {selectedCircle}
                     </Badge>
-                  )}
-                  {selectedCircle && selectedCircle.memberEmails.length > 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      {selectedCircle.memberEmails.join(', ')}
-                    </p>
-                  )}
-                  {circles.length === 0 && (
-                    <p className="text-xs text-muted-foreground">No circles yet</p>
                   )}
                 </div>
 
@@ -562,7 +569,7 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
                         className="w-full text-left p-3 rounded-lg border border-border hover:bg-secondary/50 transition-colors"
                       >
                         <p className="text-sm font-medium truncate">{draft.title}</p>
-                        <p className="text-xs text-muted-foreground">To: {circleName(draft.circleId)}</p>
+                        <p className="text-xs text-muted-foreground">To: {circleLabel(draft.circleId)}</p>
                         <p className="text-xs text-muted-foreground">{formatSavedAt(draft.updatedAt)}</p>
                       </button>
                     ))}
@@ -604,40 +611,24 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
         </div>
       </div>
 
-      <Dialog open={showCircleDialog} onOpenChange={setShowCircleDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="font-display">Select a Circle</DialogTitle>
-            <DialogDescription>
-              Send your letter to an entire group at once
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            {circles.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No circles yet</p>
-            ) : (
-              circles.map((circle) => (
-                <button
-                  key={circle.id}
-                  onClick={() => {
-                    setCircleId(circle.id);
-                    setShowCircleDialog(false);
-                  }}
-                  className="w-full text-left p-4 rounded-lg border border-border hover:bg-secondary/50 transition-colors"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-medium">{circle.name}</h4>
-                    <Badge>{circle.memberEmails.length} members</Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {circle.memberEmails.join(', ')}
-                  </p>
-                </button>
-              ))
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <CircleManager
+        open={showCircleDialog}
+        onOpenChange={(open) => {
+          setShowCircleDialog(open);
+          if (!open) {
+            refreshCircles().catch((error) => {
+              toast.error(errorMessage(error, 'Could not load circles'));
+            });
+          }
+        }}
+        onUse={handleUseCircle}
+        onDeleted={(circle) => {
+          if (selectedCircle === circle.name || selectedCircleId === circle.id) {
+            setSelectedCircle('');
+            setSelectedCircleId(null);
+          }
+        }}
+      />
 
       <Dialog open={showDraftsDialog} onOpenChange={setShowDraftsDialog}>
         <DialogContent className="max-w-2xl">
@@ -655,7 +646,7 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
                 className="w-full text-left p-4 rounded-lg border border-border hover:bg-secondary/50 transition-colors"
               >
                 <h4 className="font-medium mb-1">{draft.title}</h4>
-                <p className="text-sm text-muted-foreground mb-2">To: {circleName(draft.circleId)}</p>
+                <p className="text-sm text-muted-foreground mb-2">To: {circleLabel(draft.circleId)}</p>
                 <p className="text-sm text-muted-foreground line-clamp-2">{plainText(draft.body)}</p>
                 <p className="text-xs text-muted-foreground mt-2">Saved {formatSavedAt(draft.updatedAt)}</p>
               </button>
