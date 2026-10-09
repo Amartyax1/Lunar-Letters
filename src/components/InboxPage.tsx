@@ -9,82 +9,46 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
+import { listInbox, type Letter } from '../lib/mailbox';
 
-interface Letter {
-  id: string;
-  from: string;
-  subject: string;
-  preview: string;
-  date: string;
-  read: boolean;
-  content: string;
-  backgroundColor?: string;
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error) return error;
+  return 'Something went wrong while loading your inbox.';
+}
+
+function formatLetterDate(value: string | null): string {
+  if (!value) return 'Unknown date';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function letterTitle(letter: Letter): string {
+  const title = letter.title.trim();
+  return title || 'Untitled letter';
+}
+
+function letterPreview(body: string): string {
+  const flat = body.replace(/\s+/g, ' ').trim();
+  if (!flat) return 'This letter is empty.';
+  if (flat.length <= 180) return flat;
+  return `${flat.slice(0, 177)}…`;
 }
 
 export function InboxPage() {
-  const [letters, setLetters] = useState<Letter[]>([
-    {
-      id: '1',
-      from: 'Sarah Mitchell',
-      subject: 'Catching up from the mountains',
-      preview: 'Hey! I hope this letter finds you well. I wanted to share some thoughts from my recent trip...',
-      date: 'Dec 1, 2024',
-      read: false,
-      content: `Hey! I hope this letter finds you well. I wanted to share some thoughts from my recent trip to the mountains.
-
-The air up there is different - crisp, clean, and somehow makes everything feel more real. I spent most mornings watching the sunrise paint the peaks in shades of pink and gold.
-
-I thought of you a lot during the quiet moments. Remember when we used to talk about taking that road trip? I think we should finally do it.
-
-Hope you're doing well. Write back when you can!
-
-With love,
-Sarah`,
-      backgroundColor: '#fef3e2',
-    },
-    {
-      id: '2',
-      from: 'Marcus Chen',
-      subject: 'Book recommendation you NEED to read',
-      preview: 'Alright, so I just finished this book and I immediately thought of you because...',
-      date: 'Dec 1, 2024',
-      read: false,
-      content: `Alright, so I just finished this book and I immediately thought of you because it's exactly the kind of weird, philosophical fiction you love.
-
-It's called "The Overstory" by Richard Powers. It's about trees. Yes, trees. But also about human connection, time, and how we're all part of something bigger.
-
-I won't spoil it, but there's this one scene in chapter 4 that literally made me stop and stare at the wall for 10 minutes.
-
-Let me know if you read it. We need to discuss.
-
-Marcus`,
-      backgroundColor: '#e8f4f8',
-    },
-    {
-      id: '3',
-      from: 'Emma Rodriguez',
-      subject: 'Thank you for everything',
-      preview: 'I know I don\'t say this enough, but I wanted to write and tell you how much your friendship...',
-      date: 'Nov 1, 2024',
-      read: true,
-      content: `I know I don't say this enough, but I wanted to write and tell you how much your friendship means to me.
-
-This past year has been challenging in ways I didn't expect, and you've been there through all of it. The late-night calls, the spontaneous coffee dates, the way you always know when I need to talk.
-
-I'm writing this at 2 AM because I couldn't sleep and I realized I never properly thanked you for being such an incredible human.
-
-Thank you for being you.
-
-Emma`,
-      backgroundColor: '#f8e8f4',
-    },
-  ]);
-
+  const [letters, setLetters] = useState<Letter[]>([]);
+  const [openedIds, setOpenedIds] = useState<string[]>([]);
   const [selectedLetter, setSelectedLetter] = useState<Letter | null>(null);
   const [daysUntilDrop, setDaysUntilDrop] = useState(5);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Calculate days until next month (1st of next month)
     const today = new Date();
     const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
     const diffTime = nextMonth.getTime() - today.getTime();
@@ -92,21 +56,42 @@ Emma`,
     setDaysUntilDrop(diffDays);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    listInbox()
+      .then((rows) => {
+        if (cancelled) return;
+        if (!Array.isArray(rows)) {
+          throw new Error('Inbox did not return a list of letters.');
+        }
+        setLetters(rows);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLetters([]);
+        setError(errorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleLetterClick = (letter: Letter) => {
     setSelectedLetter(letter);
-    if (!letter.read) {
-      setLetters(letters.map(l => 
-        l.id === letter.id ? { ...l, read: true } : l
-      ));
-    }
+    setOpenedIds((ids) => (ids.includes(letter.id) ? ids : [...ids, letter.id]));
   };
 
-  const unreadCount = letters.filter(l => !l.read).length;
+  const unreadCount = letters.filter((letter) => !openedIds.includes(letter.id)).length;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-secondary/20 py-8 px-4">
       <div className="max-w-4xl mx-auto">
-        {/* Countdown Banner */}
         <Card className="mb-6 p-4 paper-texture shadow-vintage border border-accent/30 bg-gradient-to-r from-accent/10 to-accent/5">
           <div className="relative z-10 flex items-center justify-center gap-2">
             <Clock className="w-4 h-4 text-foreground" />
@@ -121,7 +106,13 @@ Emma`,
             Inbox
           </h1>
           <p className="text-muted-foreground">
-            {unreadCount > 0 ? (
+            {loading ? (
+              'Loading your letters…'
+            ) : error ? (
+              'Your letters could not be loaded.'
+            ) : letters.length === 0 ? (
+              'Your inbox is empty.'
+            ) : unreadCount > 0 ? (
               <>You have <span className="font-medium text-foreground">{unreadCount}</span> unread letter{unreadCount !== 1 ? 's' : ''}</>
             ) : (
               'All caught up!'
@@ -129,7 +120,23 @@ Emma`,
           </p>
         </div>
 
-        {letters.length === 0 ? (
+        {loading ? (
+          <Card className="p-12 text-center paper-texture shadow-vintage">
+            <div className="relative z-10">
+              <p className="text-muted-foreground">Loading your letters…</p>
+            </div>
+          </Card>
+        ) : error ? (
+          <Card className="p-12 text-center paper-texture shadow-vintage" role="alert">
+            <div className="relative z-10">
+              <Mail className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-50" />
+              <h2 className="font-display text-2xl text-foreground mb-2">
+                Couldn&apos;t load your inbox
+              </h2>
+              <p className="text-foreground">{error}</p>
+            </div>
+          </Card>
+        ) : letters.length === 0 ? (
           <Card className="p-12 text-center paper-texture shadow-vintage">
             <div className="relative z-10">
               <Mail className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-50" />
@@ -143,76 +150,84 @@ Emma`,
           </Card>
         ) : (
           <div className="space-y-4">
-            {letters.map((letter) => (
-              <Card
-                key={letter.id}
-                className="p-6 paper-texture shadow-vintage hover:shadow-vintage-lg transition-all duration-300 border border-border cursor-pointer"
-                onClick={() => handleLetterClick(letter)}
-              >
-                <div className="relative z-10 flex items-start gap-4">
-                  <div className="flex-shrink-0">
-                    {letter.read ? (
-                      <MailOpen className="w-6 h-6 text-muted-foreground" />
-                    ) : (
-                      <Mail className="w-6 h-6 text-foreground" />
-                    )}
-                  </div>
-                  
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-4 mb-2">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-display text-lg text-foreground">
-                          {letter.from}
-                        </h3>
-                        {!letter.read && (
-                          <Badge className="bg-accent text-accent-foreground">New</Badge>
-                        )}
-                      </div>
-                      <span className="text-sm text-muted-foreground font-mono flex-shrink-0">
-                        {letter.date}
-                      </span>
+            {letters.map((letter) => {
+              const opened = openedIds.includes(letter.id);
+              return (
+                <Card
+                  key={letter.id}
+                  className="p-6 paper-texture shadow-vintage hover:shadow-vintage-lg transition-all duration-300 border border-border cursor-pointer"
+                  onClick={() => handleLetterClick(letter)}
+                >
+                  <div className="relative z-10 flex items-start gap-4">
+                    <div className="flex-shrink-0">
+                      {opened ? (
+                        <MailOpen className="w-6 h-6 text-muted-foreground" />
+                      ) : (
+                        <Mail className="w-6 h-6 text-foreground" />
+                      )}
                     </div>
-                    
-                    <h4 className="font-serif text-foreground mb-2">
-                      {letter.subject}
-                    </h4>
-                    
-                    <p className="text-muted-foreground line-clamp-2">
-                      {letter.preview}
-                    </p>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-4 mb-2">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-display text-lg text-foreground">
+                            {letterTitle(letter)}
+                          </h3>
+                          {!opened && (
+                            <Badge className="bg-accent text-accent-foreground">New</Badge>
+                          )}
+                        </div>
+                        <span className="text-sm text-muted-foreground font-mono flex-shrink-0">
+                          {formatLetterDate(letter.sentAt ?? letter.createdAt)}
+                        </span>
+                      </div>
+
+                      {letter.circleId && (
+                        <p className="text-sm text-muted-foreground mb-2">
+                          Circle {letter.circleId}
+                        </p>
+                      )}
+
+                      <p className="text-muted-foreground line-clamp-2">
+                        {letterPreview(letter.body)}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              </Card>
-            ))}
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Letter Dialog */}
       <Dialog open={!!selectedLetter} onOpenChange={() => setSelectedLetter(null)}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           {selectedLetter && (
             <div>
               <DialogHeader>
                 <DialogTitle className="font-display text-2xl">
-                  {selectedLetter.subject}
+                  {letterTitle(selectedLetter)}
                 </DialogTitle>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground font-mono pt-2">
-                  <span>From: {selectedLetter.from}</span>
-                  <span>•</span>
-                  <span>{selectedLetter.date}</span>
+                <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground font-mono pt-2">
+                  {selectedLetter.circleId && (
+                    <>
+                      <span>Circle {selectedLetter.circleId}</span>
+                      <span>•</span>
+                    </>
+                  )}
+                  <span>{formatLetterDate(selectedLetter.sentAt ?? selectedLetter.createdAt)}</span>
                 </div>
               </DialogHeader>
-              
-              <div 
+
+              <div
                 className="mt-6 p-8 rounded-lg lined-paper min-h-[300px]"
-                style={{ backgroundColor: selectedLetter.backgroundColor }}
+                style={{ backgroundColor: selectedLetter.paperColor || '#fafaf8' }}
               >
                 <div className="whitespace-pre-wrap leading-relaxed">
-                  {selectedLetter.content}
+                  {selectedLetter.body}
                 </div>
               </div>
-              
+
               <div className="mt-6 flex justify-end">
                 <Button variant="outline" onClick={() => setSelectedLetter(null)}>
                   Close
