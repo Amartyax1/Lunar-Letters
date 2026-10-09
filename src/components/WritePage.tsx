@@ -31,6 +31,8 @@ import {
 import { Bold, Italic, List, Save, Send, Palette, Users, FileText, Sparkles, Clock } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner@2.0.3';
+import { CircleManager } from './CircleManager';
+import type { Circle } from '../lib/mailbox';
 
 interface Draft {
   id: string;
@@ -39,12 +41,6 @@ interface Draft {
   content: string;
   backgroundColor: string;
   savedAt: string;
-}
-
-interface Circle {
-  id: string;
-  name: string;
-  members: string[];
 }
 
 interface EditLetter {
@@ -94,12 +90,6 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
       savedAt: '1 day ago',
     },
   ]);
-
-  const circles: Circle[] = [
-    { id: '1', name: 'Book Club', members: ['Sarah', 'Marcus', 'Emma', 'James'] },
-    { id: '2', name: 'Family', members: ['Mom', 'Dad', 'Sister'] },
-    { id: '3', name: 'College Friends', members: ['Alex', 'Jordan', 'Sam', 'Chris'] },
-  ];
 
   const colorPalettes = [
     { name: 'Classic Paper', color: '#fafaf8' },
@@ -212,13 +202,10 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
     setSelectedCircle('');
   };
 
-  const handleCircleSelect = (circleId: string) => {
-    const circle = circles.find(c => c.id === circleId);
-    if (circle) {
-      setSelectedCircle(circle.name);
-      setTo(circle.members.join(', '));
-      setShowCircleDialog(false);
-    }
+  const handleUseCircle = (circle: Circle) => {
+    setSelectedCircle(circle.name);
+    setTo((circle.memberEmails ?? []).join(', '));
+    setShowCircleDialog(false);
   };
 
   // Calculate countdown
@@ -442,34 +429,16 @@ export function WritePage({ letterToEdit, onClearEdit }: WritePageProps) {
         </div>
       </div>
 
-      {/* Circle Selection Dialog */}
-      <Dialog open={showCircleDialog} onOpenChange={setShowCircleDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="font-display">Select a Circle</DialogTitle>
-            <DialogDescription>
-              Send your letter to an entire group at once
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            {circles.map((circle) => (
-              <button
-                key={circle.id}
-                onClick={() => handleCircleSelect(circle.id)}
-                className="w-full text-left p-4 rounded-lg border border-border hover:bg-secondary/50 transition-colors"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="font-medium">{circle.name}</h4>
-                  <Badge>{circle.members.length} members</Badge>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {circle.members.join(', ')}
-                </p>
-              </button>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <CircleManager
+        open={showCircleDialog}
+        onOpenChange={setShowCircleDialog}
+        onUse={handleUseCircle}
+        onDeleted={(circle) => {
+          if (selectedCircle === circle.name) {
+            setSelectedCircle('');
+          }
+        }}
+      />
 
       {/* All Drafts Dialog */}
       <Dialog open={showDraftsDialog} onOpenChange={setShowDraftsDialog}>
